@@ -4,6 +4,10 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
 
+from scripts.utils.historical_firms import (
+    build_historical_firms_summary,
+)
+
 
 HISTORICAL_FIRE_FILE = Path(
     "data/raw/fires/historical/"
@@ -15,9 +19,7 @@ GRID_FILE = Path(
     "california_grid_10km.geojson"
 )
 
-OUTPUT_FOLDER = Path(
-    "data/interim/fires_historical_by_grid"
-)
+OUTPUT_FOLDER = Path("data/processed")
 
 OUTPUT_FOLDER.mkdir(
     parents=True,
@@ -26,12 +28,12 @@ OUTPUT_FOLDER.mkdir(
 
 OUTPUT_PARQUET = (
     OUTPUT_FOLDER
-    / "historical_fire_count_2020_2023.parquet"
+    / "historical_firms_by_grid_2020_2023.parquet"
 )
 
 OUTPUT_CSV = (
     OUTPUT_FOLDER
-    / "historical_fire_count_2020_2023.csv"
+    / "historical_firms_by_grid_2020_2023.csv"
 )
 
 
@@ -127,7 +129,7 @@ def main() -> None:
         grid.crs
     )
 
-    print("Assigning historical fires to grid cells...")
+    print("Assigning historical FIRMS detections to grid cells...")
 
     joined = gpd.sjoin(
         fire_points,
@@ -146,34 +148,12 @@ def main() -> None:
         f"{len(joined):,}"
     )
 
-    print("Counting detections by grid cell...")
+    print("Building historical FIRMS summary...")
 
-    counts = (
-        joined.groupby("grid_id")
-        .size()
-        .reset_index(
-            name="historical_fire_count_2020_2023"
-        )
-    )
-
-    all_grid_ids = grid[
-        ["grid_id"]
-    ].copy()
-
-    result = all_grid_ids.merge(
-        counts,
-        on="grid_id",
-        how="left",
-    )
-
-    result[
-        "historical_fire_count_2020_2023"
-    ] = (
-        result[
-            "historical_fire_count_2020_2023"
-        ]
-        .fillna(0)
-        .astype(int)
+    result = build_historical_firms_summary(
+        joined,
+        date_column="acq_date",
+        all_grid_ids=grid["grid_id"],
     )
 
     result.to_parquet(
@@ -187,18 +167,20 @@ def main() -> None:
     )
 
     print()
-    print("Historical fire processing complete.")
+    print("Historical FIRMS processing complete.")
     print(f"Grid rows: {len(result):,}")
     print(
-        "Grid cells with historical fires: "
+        "Grid cells with historical FIRMS detections: "
         f"{(
-            result['historical_fire_count_2020_2023'] > 0
+            result[
+                'historical_firms_detection_count_2020_2023'
+            ] > 0
         ).sum():,}"
     )
     print(
         "Total assigned historical detections: "
         f"{result[
-            'historical_fire_count_2020_2023'
+            'historical_firms_detection_count_2020_2023'
         ].sum():,}"
     )
     print(f"Saved Parquet: {OUTPUT_PARQUET}")

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer
@@ -24,8 +25,16 @@ from scripts.utils.experiment_logging import (
     save_experiment_results,
     save_test_predictions,
 )
+from scripts.utils.historical_firms import (
+    HISTORICAL_FIRMS_COLUMNS,
+    validate_historical_firms_summary,
+)
 
-EXPERIMENT_NAME = "logistic_rolling_weather_2024"
+EXPERIMENT_NAME = "logistic_rolling_history_2024"
+EXPERIMENT_NOTES = (
+    "Balanced class weights; daily and rolling weather; "
+    "LANDFIRE; historical FIRMS features from 2020-2023."
+)
 
 TRAINING_PATH = Path(
     "data/processed/wildfire_training_2024.parquet"
@@ -35,6 +44,14 @@ LANDFIRE_PATH = Path(
     "data/processed/california_landfire_by_grid_2024.parquet"
 )
 
+HISTORICAL_FIRMS_PATH = Path(
+    "data/processed/historical_firms_by_grid_2020_2023.parquet"
+)
+
+HISTORICAL_DETECTION_COUNT_COLUMN = (
+    "historical_firms_detection_count_2020_2023"
+)
+
 MODEL_DIR = Path("models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -42,6 +59,9 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 def load_and_merge_data() -> pd.DataFrame:
     training_data = pd.read_parquet(TRAINING_PATH)
     landfire_data = pd.read_parquet(LANDFIRE_PATH)
+    historical_firms_data = pd.read_parquet(
+        HISTORICAL_FIRMS_PATH
+    )
 
     required_training_columns = [
         "date",
@@ -88,16 +108,88 @@ def load_and_merge_data() -> pd.DataFrame:
             f"{missing_landfire_columns}"
         )
 
-    duplicate_landfire_grids = (
-        landfire_data["grid_id"]
-        .duplicated()
-        .sum()
+    duplicate_landfire_grids = int(
+        landfire_data["grid_id"].duplicated().sum()
     )
 
-    if duplicate_landfire_grids > 0:
+    if duplicate_landfire_grids:
         raise ValueError(
             "LANDFIRE data contains "
             f"{duplicate_landfire_grids} duplicate grid IDs."
+        )
+
+    required_historical_columns = {
+        "grid_id",
+        HISTORICAL_DETECTION_COUNT_COLUMN,
+    }
+    missing_required_historical_columns = (
+        required_historical_columns
+        - set(historical_firms_data.columns)
+    )
+
+    if missing_required_historical_columns:
+        raise ValueError(
+            "Historical FIRMS data is missing required columns: "
+            f"{sorted(missing_required_historical_columns)}"
+        )
+
+    available_historical_columns = [
+        column
+        for column in HISTORICAL_FIRMS_COLUMNS
+        if column in historical_firms_data.columns
+    ]
+    missing_optional_historical_columns = [
+        column
+        for column in HISTORICAL_FIRMS_COLUMNS
+        if column not in historical_firms_data.columns
+    ]
+
+    if missing_optional_historical_columns:
+        duplicate_historical_grids = int(
+            historical_firms_data["grid_id"]
+            .duplicated()
+            .sum()
+        )
+
+        if duplicate_historical_grids:
+            raise ValueError(
+                "Historical FIRMS data contains "
+                f"{duplicate_historical_grids} duplicate grid IDs."
+            )
+
+        historical_detection_counts = historical_firms_data[
+            HISTORICAL_DETECTION_COUNT_COLUMN
+        ]
+
+        if (
+            not pd.api.types.is_numeric_dtype(
+                historical_detection_counts
+            )
+            or historical_detection_counts.isna().any()
+            or (historical_detection_counts < 0).any()
+        ):
+            raise ValueError(
+                "Historical FIRMS detection counts must be "
+                "non-negative numeric values without missing data."
+            )
+
+        print(
+            "\nWARNING: Using a legacy historical FIRMS "
+            "summary. These features are unavailable and "
+            "will be omitted:"
+        )
+
+        for column in missing_optional_historical_columns:
+            print(f"- {column}")
+
+        print(
+            "Regenerate the summary with "
+            "scripts/13_process_historical_fires.py "
+            "to include them."
+        )
+    else:
+        validate_historical_firms_summary(
+            historical_firms_data
         )
 
     training_data["date"] = pd.to_datetime(
@@ -111,29 +203,71 @@ def load_and_merge_data() -> pd.DataFrame:
         validate="many_to_one",
     )
 
+    data = data.merge(
+        historical_firms_data[
+            [
+                "grid_id",
+                *available_historical_columns,
+            ]
+        ],
+        on="grid_id",
+        how="left",
+        validate="many_to_one",
+    )
+
     if len(data) != len(training_data):
         raise ValueError(
-            "The LANDFIRE merge changed the number of rows."
+            "The feature merges changed the number of rows."
         )
 
-    print(f"Training rows before merge: {len(training_data):,}")
-    print(f"Rows after merge: {len(data):,}")
-
-    print("\nLANDFIRE missingness:")
-    print(
-        data[
-            [
-                "vegetation_cover_mean",
-                "fuel_model_dominant",
-                "landfire_missing",
-            ]
-        ]
+    missing_historical = (
+        data[available_historical_columns]
         .isna()
-        .mean()
-        .sort_values(ascending=False)
+        .any(axis=1)
+    )
+
+    print(
+        f"Rows without a historical FIRMS match: "
+        f"{int(missing_historical.sum()):,}"
+    )
+
+    unmatched_grids = (
+        data.loc[
+            missing_historical,
+            "grid_id",
+        ]
+        .nunique()
+    )
+
+    print(
+        f"Unique grids without a match: "
+        f"{unmatched_grids:,}"
+    )
+
+    data[available_historical_columns] = (
+        data[available_historical_columns]
+        .fillna(0)
+        .astype("int32")
+    )
+
+    data["historical_firms_detection_count_log"] = np.log1p(
+        data[HISTORICAL_DETECTION_COUNT_COLUMN]
+    )
+
+    print(
+        f"Training rows before merge: "
+        f"{len(training_data):,}"
+    )
+    print(f"Rows after merges: {len(data):,}")
+
+    print("\nHistorical FIRMS summary:")
+    print(
+        historical_firms_data[available_historical_columns]
+        .describe()
     )
 
     return data
+
 
 def create_rolling_weather_features(
     data: pd.DataFrame,
@@ -236,6 +370,7 @@ def create_rolling_weather_features(
 
     return result
 
+
 def create_next_day_label(
     data: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -307,6 +442,7 @@ def create_next_day_label(
 
     return data
 
+
 def prepare_features(
     data: pd.DataFrame,
 ) -> tuple[
@@ -330,7 +466,19 @@ def prepare_features(
         "rain_previous_30d",
         "temperature_max_previous_3d",
         "humidity_min_previous_3d",
+        "historical_firms_detection_count_log",
     ]
+
+    optional_historical_features = [
+        "historical_fire_active_days_2020_2023",
+        "historical_fire_active_years_2020_2023",
+    ]
+
+    numeric_features.extend(
+        column
+        for column in optional_historical_features
+        if column in data.columns
+    )
 
     categorical_features = [
         "wind_direction_dominant",
@@ -455,6 +603,7 @@ def split_data_by_time(
         validation_data,
         test_data,
     )
+
 
 def build_pipeline(
     numeric_features: list[str],
@@ -710,10 +859,7 @@ def main() -> None:
         validation_results=validation_results,
         test_results=test_results,
         feature_columns=feature_columns,
-        notes=(
-            "Balanced class weights; daily and rolling "
-            "weather features; LANDFIRE features."
-        ),
+        notes=EXPERIMENT_NOTES,
     )
 
     save_test_predictions(
