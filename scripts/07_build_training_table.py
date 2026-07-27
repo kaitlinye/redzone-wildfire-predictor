@@ -23,6 +23,11 @@ LANDFIRE_FILE = Path(
     "california_landfire_by_grid_2024.parquet"
 )
 
+HISTORICAL_FIRE_COUNT_FILE = Path(
+    "data/interim/fires_historical_by_grid/"
+    "historical_fire_count_2020_2023.parquet"
+)
+
 OUTPUT_FOLDER = Path(
     "data/processed"
 )
@@ -67,6 +72,12 @@ landfire = pd.read_parquet(
     LANDFIRE_FILE
 )
 
+print("Reading historical fire counts...")
+
+historical_fire_counts = pd.read_parquet(
+    HISTORICAL_FIRE_COUNT_FILE
+)
+
 
 weather["date"] = pd.to_datetime(
     weather["date"]
@@ -95,6 +106,20 @@ weather = weather.merge(
             "vegetation_cover_mean",
             "fuel_model_dominant",
             "landfire_missing",
+        ]
+    ],
+    on="grid_id",
+    how="left",
+)
+
+
+print("Adding historical fire counts...")
+
+weather = weather.merge(
+    historical_fire_counts[
+        [
+            "grid_id",
+            "historical_fire_count_2020_2023",
         ]
     ],
     on="grid_id",
@@ -155,6 +180,15 @@ data["fuel_model_dominant"] = (
 data["landfire_missing"] = (
     data["landfire_missing"]
     .fillna(1)
+    .astype(int)
+)
+
+
+print("Checking historical fire counts...")
+
+data["historical_fire_count_2020_2023"] = (
+    data["historical_fire_count_2020_2023"]
+    .fillna(0)
     .astype(int)
 )
 
@@ -256,6 +290,9 @@ data.head(5000).to_csv(
 )
 
 
+print()
+print("Training dataset complete.")
+
 print(
     f"Final rows: "
     f"{len(data):,}"
@@ -284,6 +321,21 @@ print(
 print(
     "LANDFIRE missing rows: "
     f"{data['landfire_missing'].sum():,}"
+)
+
+print(
+    "Missing historical fire counts: "
+    f"{data[
+        'historical_fire_count_2020_2023'
+    ].isna().sum():,}"
+)
+
+print(
+    "Grid cells with historical fires: "
+    f"{data.loc[
+        data['historical_fire_count_2020_2023'] > 0,
+        'grid_id'
+    ].nunique():,}"
 )
 
 print(
