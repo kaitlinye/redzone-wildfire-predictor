@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project specific
+# Ignore all dataset contents
+data/raw/*
+data/interim/*
+data/processed/*
+
+# Keep placeholder files so folders remain in Git
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
