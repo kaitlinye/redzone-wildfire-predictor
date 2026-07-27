@@ -1,0 +1,235 @@
+from pathlib import Path
+
+import pandas as pd
+
+
+WEATHER_FILE = Path(
+    "data/interim/weather_daily/"
+    "california_weather_daily_2024.parquet"
+)
+
+FIRE_FILE = Path(
+    "data/interim/fires_daily/"
+    "fires_by_grid_day_2024.parquet"
+)
+
+GRID_FILE = Path(
+    "data/interim/grid/"
+    "california_grid_centroids.csv"
+)
+
+OUTPUT_FOLDER = Path(
+    "data/processed"
+)
+
+OUTPUT_FOLDER.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+OUTPUT_PARQUET = (
+    OUTPUT_FOLDER
+    / "wildfire_training_2024.parquet"
+)
+
+OUTPUT_CSV = (
+    OUTPUT_FOLDER
+    / "wildfire_training_2024_sample.csv"
+)
+
+
+print("Reading weather data...")
+
+weather = pd.read_parquet(
+    WEATHER_FILE
+)
+
+print("Reading fire data...")
+
+fires = pd.read_parquet(
+    FIRE_FILE
+)
+
+print("Reading grid coordinates...")
+
+grid = pd.read_csv(
+    GRID_FILE
+)
+
+
+weather["date"] = pd.to_datetime(
+    weather["date"]
+).dt.tz_localize(None)
+
+fires["date"] = pd.to_datetime(
+    fires["date"]
+).dt.tz_localize(None)
+
+
+print("Adding grid coordinates...")
+
+weather = weather.merge(
+    grid,
+    on="grid_id",
+    how="left",
+)
+
+
+print("Adding fire detections...")
+
+data = weather.merge(
+    fires,
+    on=[
+        "grid_id",
+        "date",
+    ],
+    how="left",
+)
+
+
+data["fire_detection_count"] = (
+    data["fire_detection_count"]
+    .fillna(0)
+    .astype(int)
+)
+
+data["fire_today"] = (
+    data["fire_today"]
+    .fillna(0)
+    .astype(int)
+)
+
+if "maximum_frp" in data.columns:
+    data["maximum_frp"] = (
+        data["maximum_frp"]
+        .fillna(0)
+    )
+
+if "mean_frp" in data.columns:
+    data["mean_frp"] = (
+        data["mean_frp"]
+        .fillna(0)
+    )
+
+
+print("Creating rolling weather features...")
+
+data = data.sort_values(
+    [
+        "grid_id",
+        "date",
+    ]
+).reset_index(drop=True)
+
+
+data["rain_7d"] = (
+    data.groupby("grid_id")[
+        "precipitation_total"
+    ]
+    .transform(
+        lambda values:
+        values.rolling(
+            7,
+            min_periods=1,
+        ).sum()
+    )
+)
+
+data["rain_30d"] = (
+    data.groupby("grid_id")[
+        "precipitation_total"
+    ]
+    .transform(
+        lambda values:
+        values.rolling(
+            30,
+            min_periods=1,
+        ).sum()
+    )
+)
+
+data["temperature_max_3d"] = (
+    data.groupby("grid_id")[
+        "temperature_max"
+    ]
+    .transform(
+        lambda values:
+        values.rolling(
+            3,
+            min_periods=1,
+        ).max()
+    )
+)
+
+data["humidity_min_3d"] = (
+    data.groupby("grid_id")[
+        "humidity_min"
+    ]
+    .transform(
+        lambda values:
+        values.rolling(
+            3,
+            min_periods=1,
+        ).min()
+    )
+)
+
+
+print("Creating next-day fire label...")
+
+data["fire_next_day"] = (
+    data.groupby("grid_id")[
+        "fire_today"
+    ]
+    .shift(-1)
+)
+
+data = data.dropna(
+    subset=[
+        "fire_next_day",
+    ]
+)
+
+data["fire_next_day"] = (
+    data["fire_next_day"]
+    .astype(int)
+)
+
+
+print("Saving final model dataset...")
+
+data.to_parquet(
+    OUTPUT_PARQUET,
+    index=False,
+)
+
+data.head(5000).to_csv(
+    OUTPUT_CSV,
+    index=False,
+)
+
+
+print(
+    f"Final rows: "
+    f"{len(data):,}"
+)
+
+print(
+    f"Positive next-day fire rows: "
+    f"{data['fire_next_day'].sum():,}"
+)
+
+print(
+    f"Positive rate: "
+    f"{data['fire_next_day'].mean():.6f}"
+)
+
+print(
+    f"Saved final Parquet to: "
+    f"{OUTPUT_PARQUET}"
+)
+
+print(
+    f"Saved sample CSV to: "
+    f"{OUTPUT_CSV}"
+)

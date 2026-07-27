@@ -1,0 +1,16 @@
+region:
+  name: California
+  state_code: CA
+
+dates:
+  start: "2024-05-01"
+  end: "2024-10-31"
+
+grid:
+  size_km: 10
+
+time:
+  timezone: UTC
+
+prediction:
+  horizon_days: 1
