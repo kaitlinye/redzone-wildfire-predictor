@@ -25,6 +25,7 @@ from scripts.utils.experiment_logging import (
     save_test_predictions,
 )
 
+EXPERIMENT_NAME = "logistic_rolling_weather_2024"
 
 TRAINING_PATH = Path(
     "data/processed/wildfire_training_2024.parquet"
@@ -699,7 +700,7 @@ def main() -> None:
 
     save_experiment_results(
         experiment_name=(
-            "logistic_regression_rolling_weather_2024"
+            EXPERIMENT_NAME
         ),
         model_name="LogisticRegression",
         train_data=train_data,
@@ -720,14 +721,14 @@ def main() -> None:
         probabilities=test_results["probabilities"],
         predictions=test_results["predictions"],
         output_path=Path(
-            "data/processed/"
-            "logistic_regression_test_predictions_2024.parquet"
+            "data/processed/predictions/"
+            f"{EXPERIMENT_NAME}.parquet"
         ),
     )
 
     model_path = (
         MODEL_DIR
-        / "logistic_regression_2024.joblib"
+        / f"{EXPERIMENT_NAME}.joblib"
     )
 
     joblib.dump(
