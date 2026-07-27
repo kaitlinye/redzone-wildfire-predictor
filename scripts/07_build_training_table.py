@@ -18,6 +18,11 @@ GRID_FILE = Path(
     "california_grid_centroids.csv"
 )
 
+LANDFIRE_FILE = Path(
+    "data/interim/vegetation_by_grid/"
+    "california_landfire_by_grid_2024.parquet"
+)
+
 OUTPUT_FOLDER = Path(
     "data/processed"
 )
@@ -56,6 +61,12 @@ grid = pd.read_csv(
     GRID_FILE
 )
 
+print("Reading LANDFIRE data...")
+
+landfire = pd.read_parquet(
+    LANDFIRE_FILE
+)
+
 
 weather["date"] = pd.to_datetime(
     weather["date"]
@@ -70,6 +81,22 @@ print("Adding grid coordinates...")
 
 weather = weather.merge(
     grid,
+    on="grid_id",
+    how="left",
+)
+
+
+print("Adding vegetation and fuel data...")
+
+weather = weather.merge(
+    landfire[
+        [
+            "grid_id",
+            "vegetation_cover_mean",
+            "fuel_model_dominant",
+            "landfire_missing",
+        ]
+    ],
     on="grid_id",
     how="left",
 )
@@ -110,6 +137,26 @@ if "mean_frp" in data.columns:
         data["mean_frp"]
         .fillna(0)
     )
+
+
+print("Checking LANDFIRE values...")
+
+data["vegetation_cover_mean"] = (
+    data["vegetation_cover_mean"]
+    .fillna(0)
+)
+
+data["fuel_model_dominant"] = (
+    data["fuel_model_dominant"]
+    .fillna(0)
+    .astype(int)
+)
+
+data["landfire_missing"] = (
+    data["landfire_missing"]
+    .fillna(1)
+    .astype(int)
+)
 
 
 print("Creating rolling weather features...")
@@ -222,6 +269,21 @@ print(
 print(
     f"Positive rate: "
     f"{data['fire_next_day'].mean():.6f}"
+)
+
+print(
+    "Missing vegetation values: "
+    f"{data['vegetation_cover_mean'].isna().sum():,}"
+)
+
+print(
+    "Missing fuel values: "
+    f"{data['fuel_model_dominant'].isna().sum():,}"
+)
+
+print(
+    "LANDFIRE missing rows: "
+    f"{data['landfire_missing'].sum():,}"
 )
 
 print(
