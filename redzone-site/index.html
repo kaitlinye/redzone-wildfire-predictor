@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="RedZone California wildfire risk prediction interface demo" />
+  <title>RedZone — California Wildfire Risk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="RedZone home">
+        <img class="brand-logo" src="redzone-logo.png" alt="RedZone" />
+      </a>
+
+      <section class="time-control" aria-labelledby="time-title">
+        <div class="time-heading">
+          <span id="time-title">Prediction time</span>
+          <strong id="time-value">Now</strong>
+        </div>
+        <input id="time-slider" type="range" min="0" max="5" step="1" value="0" aria-label="Prediction time" />
+        <div class="time-ticks" aria-hidden="true">
+          <span>Now</span><span>6h</span><span>12h</span><span>24h</span><span>48h</span><span>72h</span>
+        </div>
+      </section>
+    </header>
+
+    <main class="workspace">
+      <section class="map-wrap" aria-label="California wildfire risk prediction map">
+        <div id="map"></div>
+
+        <div class="map-toolbar" aria-label="Map controls">
+          <button id="zoom-in" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+          <button id="zoom-out" type="button" title="Zoom out" aria-label="Zoom out">−</button>
+          <button id="home-map" type="button" title="Return to California" aria-label="Return to California">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8v10h-6v-6H9v6H3V11Z"/></svg>
+          </button>
+        </div>
+
+        <div class="terrain-control" aria-label="Terrain detail">
+          <p>Terrain detail</p>
+          <div class="terrain-options">
+            <button type="button" data-terrain="soft">Soft</button>
+            <button type="button" data-terrain="balanced" class="active">Balanced</button>
+            <button type="button" data-terrain="detailed">Detailed</button>
+          </div>
+        </div>
+
+        <div class="legend" aria-label="Risk level legend">
+          <strong>Risk level</strong>
+          <span><i class="low"></i>Low</span>
+          <span><i class="medium"></i>Medium</span>
+          <span><i class="high"></i>High</span>
+          <span><i class="extreme"></i>Extreme</span>
+          <span><i class="unavailable"></i>Not analyzed</span>
+        </div>
+
+        <div class="sample-badge">Sample predictions</div>
+      </section>
+
+      <aside id="detail-panel" class="detail-panel" aria-live="polite" aria-label="Prediction details">
+        <button id="close-details" class="close-details" type="button" aria-label="Close details">×</button>
+        <div id="empty-state" class="empty-state">
+          <div class="empty-pin">⌖</div>
+          <h1>Select a prediction point</h1>
+          <p>Click a map pin in a Northern California forest to view the exact risk and conditions.</p>
+        </div>
+        <div id="detail-content" class="detail-content" hidden></div>
+      </aside>
+    </main>
+  </div>
+
+  <template id="popup-template">
+    <article class="prediction-popup">
+      <div class="popup-risk-row">
+        <span class="popup-pin">●</span>
+        <strong class="popup-risk"></strong>
+      </div>
+      <h2 class="popup-title"></h2>
+      <dl class="popup-stats"></dl>
+      <button class="learn-more" type="button">Learn more <span>→</span></button>
+    </article>
+  </template>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
