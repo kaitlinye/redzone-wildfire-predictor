@@ -81,16 +81,36 @@ def evaluate_binary_classifier(
     threshold: float,
 ) -> EvaluationResults:
     probabilities = model.predict_proba(X)[:, 1]
-    predictions = (probabilities >= threshold).astype(int)
+
+    results = evaluate_binary_scores(
+        name=name,
+        y=y,
+        scores=probabilities,
+        threshold=threshold,
+    )
+    results["probabilities"] = probabilities
+
+    return results
+
+
+def evaluate_binary_scores(
+    *,
+    name: str,
+    y: pd.Series,
+    scores: np.ndarray,
+    threshold: float,
+) -> EvaluationResults:
+    """Evaluate arbitrary classifier or ranking scores."""
+    predictions = (scores >= threshold).astype(int)
 
     pr_auc = average_precision_score(
         y,
-        probabilities,
+        scores,
     )
 
     roc_auc = roc_auc_score(
         y,
-        probabilities,
+        scores,
     )
 
     precision_value = precision_score(
@@ -143,6 +163,115 @@ def evaluate_binary_classifier(
         "recall": float(recall_value),
         "f1": float(f1_value),
         "confusion_matrix": confusion,
-        "probabilities": probabilities,
+        "scores": scores,
         "predictions": predictions,
     }
+
+
+def evaluate_daily_ranking(
+    *,
+    dates: pd.Series,
+    y: pd.Series,
+    scores: np.ndarray,
+    top_fractions: tuple[
+        float,
+        ...,
+    ] = (
+        0.01,
+        0.05,
+        0.10,
+    ),
+) -> pd.DataFrame:
+    """Measure positive-row capture within each day's top scores."""
+    if not (
+        len(dates)
+        == len(y)
+        == len(scores)
+    ):
+        raise ValueError(
+            "Dates, labels, and scores must have equal lengths."
+        )
+
+    ranking = pd.DataFrame(
+        {
+            "date": pd.to_datetime(
+                dates
+            ).to_numpy(),
+            "label": y.to_numpy(),
+            "score": scores,
+        }
+    )
+    ranking["daily_rank"] = (
+        ranking.groupby("date")["score"]
+        .rank(
+            method="first",
+            ascending=False,
+        )
+    )
+    daily_row_count = (
+        ranking.groupby("date")["score"]
+        .transform("size")
+    )
+    total_positives = int(
+        ranking["label"].sum()
+    )
+
+    if total_positives == 0:
+        raise ValueError(
+            "Daily ranking data contains no positive rows."
+        )
+
+    records: list[
+        dict[str, float | int | str]
+    ] = []
+
+    for fraction in top_fractions:
+        if not 0 < fraction <= 1:
+            raise ValueError(
+                "Top fractions must be within (0, 1]."
+            )
+
+        daily_cutoff = np.ceil(
+            daily_row_count * fraction
+        )
+        selected = ranking[
+            ranking["daily_rank"]
+            <= daily_cutoff
+        ]
+        selected_count = len(selected)
+        captured_positives = int(
+            selected["label"].sum()
+        )
+
+        records.append(
+            {
+                "risk_group": (
+                    f"Top {fraction:.0%}"
+                ),
+                "fraction": fraction,
+                "rows_selected": (
+                    selected_count
+                ),
+                "positive_rows_captured": (
+                    captured_positives
+                ),
+                "capture_rate": (
+                    captured_positives
+                    / total_positives
+                ),
+                "precision": (
+                    captured_positives
+                    / selected_count
+                    if selected_count
+                    else 0.0
+                ),
+            }
+        )
+
+    results = pd.DataFrame(records)
+
+    print("\nDaily ranking results")
+    print("-" * 50)
+    print(results.to_string(index=False))
+
+    return results
