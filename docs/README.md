@@ -91,11 +91,16 @@ from the repository's **Actions** tab. It:
 1. downloads the current Open-Meteo forecast and recent weather history;
 2. builds the rolling and static model features;
 3. runs the saved CatBoost model;
-4. commits the updated `docs/data/predictions.json`; and
-5. deploys the `docs` directory to GitHub Pages.
+4. commits the updated `docs/data/predictions.json`.
 
 The workflow performs inference only. It does not retrain or replace the
 saved model.
+
+`.github/workflows/deploy-site.yml` handles deployment separately. It
+deploys the `docs` directory after every push to `main`, after a successful
+daily prediction update, or when manually started from the Actions tab.
+The `workflow_run` trigger is needed because commits pushed with the default
+GitHub Actions token do not trigger another push workflow.
 
 Before the first run, open the repository settings:
 

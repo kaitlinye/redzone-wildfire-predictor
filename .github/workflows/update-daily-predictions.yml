@@ -5,29 +5,18 @@ on:
     # 12:00 AM PST / 01:00 AM PDT. GitHub schedules always use UTC.
     - cron: "0 8 * * *"
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "docs/**"
-      - ".github/workflows/update-daily-predictions.yml"
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
-  group: redzone-pages
+  group: redzone-daily-predictions
   cancel-in-progress: false
 
 jobs:
-  update-and-deploy:
+  update-predictions:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Check out the default branch
@@ -37,7 +26,6 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Python
-        if: github.event_name != 'push'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -45,23 +33,18 @@ jobs:
           cache-dependency-path: requirements-inference.txt
 
       - name: Install inference dependencies
-        if: github.event_name != 'push'
         run: python -m pip install --requirement requirements-inference.txt
 
       - name: Download current and recent weather
-        if: github.event_name != 'push'
         run: python scripts/09_download_daily_forecast.py
 
       - name: Build next-day features
-        if: github.event_name != 'push'
         run: python scripts/10_build_daily_features.py
 
       - name: Generate website predictions
-        if: github.event_name != 'push'
         run: python scripts/14_generate_website_predictions.py
 
       - name: Commit the generated browser data
-        if: github.event_name != 'push'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -72,15 +55,3 @@ jobs:
             git commit -m "Update daily wildfire risk predictions"
             git push origin HEAD:main
           fi
-
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload website artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs
-
-      - name: Deploy GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
