@@ -12,7 +12,8 @@ let locations = [];
 let predictionMetadata = null;
 let selectedId = null;
 let activePopupMarker = null;
-let heatLayer = null;
+let riskSurfaceLayer = null;
+let pinsVisible = true;
 
 const californiaBounds = L.latLngBounds([31.8, -125.1], [42.7, -113.7]);
 const naturalView = { center: [38.35, -120.5], zoom: 6 };
@@ -62,6 +63,14 @@ const analysisOutline = L.polygon([
 }).addTo(map);
 
 const markerLayer = L.layerGroup().addTo(map);
+const riskSurfacePane = map.createPane("riskSurfacePane");
+riskSurfacePane.classList.add("risk-surface-pane");
+riskSurfacePane.style.zIndex = "350";
+riskSurfacePane.style.pointerEvents = "none";
+const riskSurfaceRenderer = L.canvas({
+  pane: "riskSurfacePane",
+  padding: 0.5
+});
 
 function escapeHTML(value) {
   return String(value)
@@ -124,30 +133,183 @@ function markerIcon(risk) {
   });
 }
 
-function renderHeatLayer() {
-  if (heatLayer) map.removeLayer(heatLayer);
+function riskFromScore(score) {
+  if (score >= 99) return "Extreme";
+  if (score >= 95) return "High";
+  if (score >= 90) return "Medium";
+  return "Low";
+}
+
+function clusterIcon(averageScore, count) {
+  const risk = riskFromScore(averageScore);
+  return L.divIcon({
+    className: "risk-cluster-marker",
+    html: `
+      <span class="cluster-shape" style="--cluster-color:${riskColors[risk]}">
+        <strong>${averageScore.toFixed(1)}</strong>
+        <small>${count} grids</small>
+      </span>
+    `,
+    iconSize: [64, 64],
+    iconAnchor: [32, 32]
+  });
+}
+
+function clusterPixelSize(zoom) {
+  if (zoom <= 5) return 110;
+  if (zoom === 6) return 90;
+  if (zoom === 7) return 72;
+  if (zoom === 8) return 52;
+  return 0;
+}
+
+function groupLocationsForZoom(items) {
+  const pixelSize = clusterPixelSize(map.getZoom());
+  if (!pixelSize) return items.map(location => [location]);
+
+  const groups = new Map();
+  items.forEach(location => {
+    const point = map.project(
+      [location.lat, location.lng],
+      map.getZoom()
+    );
+    const key = [
+      Math.floor(point.x / pixelSize),
+      Math.floor(point.y / pixelSize)
+    ].join(":");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(location);
+  });
+  return [...groups.values()];
+}
+
+function addIndividualMarker(location) {
+  const marker = L.marker([location.lat, location.lng], {
+    icon: markerIcon(location.risk),
+    title: location.name
+  });
+  marker.bindPopup(popupHTML(location), {
+    closeButton: true,
+    offset: [0, -1]
+  });
+  marker.on("popupopen", event => {
+    activePopupMarker = marker;
+    event.popup
+      .getElement()
+      ?.querySelector(".learn-more")
+      ?.addEventListener("click", () => showDetails(location.id));
+  });
+  marker.addTo(markerLayer);
+  if (selectedId === location.id) activePopupMarker = marker;
+}
+
+function addClusterMarker(group) {
+  const averageScore = (
+    group.reduce((total, location) => total + location.score, 0)
+    / group.length
+  );
+  const center = [
+    group.reduce((total, location) => total + location.lat, 0)
+      / group.length,
+    group.reduce((total, location) => total + location.lng, 0)
+      / group.length
+  ];
+  const marker = L.marker(center, {
+    icon: clusterIcon(averageScore, group.length),
+    title: `${group.length} grids · average ${averageScore.toFixed(1)} percentile`
+  });
+  marker.on("click", () => {
+    const bounds = L.latLngBounds(
+      group.map(location => [location.lat, location.lng])
+    );
+    map.fitBounds(bounds.pad(0.35), {
+      animate: true,
+      maxZoom: Math.min(9, map.getZoom() + 2)
+    });
+  });
+  marker.addTo(markerLayer);
+}
+
+function renderPredictionMarkers() {
+  markerLayer.clearLayers();
+  activePopupMarker = null;
+  if (!pinsVisible) return;
+
+  const higherRiskLocations = locations.filter(
+    location => location.score > 90
+  );
+  groupLocationsForZoom(higherRiskLocations).forEach(group => {
+    if (group.length === 1) {
+      addIndividualMarker(group[0]);
+    } else {
+      addClusterMarker(group);
+    }
+  });
+}
+
+const riskGradientStops = [
+  [0, "#2f8f3a"],
+  [70, "#78b83f"],
+  [90, "#f2be2e"],
+  [95, "#f28b24"],
+  [99, "#e3483b"],
+  [100, "#b7212d"]
+];
+
+function hexToRGB(hex) {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return {
+    red: (value >> 16) & 255,
+    green: (value >> 8) & 255,
+    blue: value & 255
+  };
+}
+
+function interpolateColor(start, end, amount) {
+  const first = hexToRGB(start);
+  const second = hexToRGB(end);
+  const channel = name => Math.round(
+    first[name] + (second[name] - first[name]) * amount
+  );
+  return `rgb(${channel("red")}, ${channel("green")}, ${channel("blue")})`;
+}
+
+function riskSurfaceColor(score) {
+  const boundedScore = Math.max(0, Math.min(100, score));
+  for (let index = 1; index < riskGradientStops.length; index += 1) {
+    const [upperScore, upperColor] = riskGradientStops[index];
+    if (boundedScore <= upperScore) {
+      const [lowerScore, lowerColor] = riskGradientStops[index - 1];
+      const position = (boundedScore - lowerScore) / (upperScore - lowerScore);
+      return interpolateColor(lowerColor, upperColor, position);
+    }
+  }
+  return riskGradientStops.at(-1)[1];
+}
+
+function renderRiskSurface() {
+  if (riskSurfaceLayer) map.removeLayer(riskSurfaceLayer);
   if (!locations.length) return;
 
-  const points = locations.map(location => [
-    location.lat,
-    location.lng,
-    Math.max(0.08, location.score / 100)
-  ]);
+  riskSurfaceLayer = L.layerGroup();
 
-  heatLayer = L.heatLayer(points, {
-    radius: 34,
-    blur: 28,
-    maxZoom: 10,
-    minOpacity: 0.2,
-    max: 1,
-    gradient: {
-      0.18: "#5ca53d",
-      0.42: "#b6c83e",
-      0.58: "#f2be2e",
-      0.76: "#f28b24",
-      1.0: "#e3483b"
-    }
-  }).addTo(map);
+  // A geographic radius keeps adjacent 10 km grids covered at every zoom.
+  // Draw low scores first so higher-risk colors remain visible on top.
+  [...locations]
+    .sort((first, second) => first.score - second.score)
+    .forEach(location => {
+      L.circle([location.lat, location.lng], {
+        renderer: riskSurfaceRenderer,
+        radius: 7200,
+        stroke: false,
+        fill: true,
+        fillColor: riskSurfaceColor(location.score),
+        fillOpacity: 0.62,
+        interactive: false
+      }).addTo(riskSurfaceLayer);
+    });
+
+  riskSurfaceLayer.addTo(map);
 }
 
 function popupHTML(location) {
@@ -184,34 +346,13 @@ function popupHTML(location) {
 }
 
 function renderMapData() {
-  markerLayer.clearLayers();
-  activePopupMarker = null;
-  renderHeatLayer();
-
-  // Keep the map responsive by placing exact pins only on the top 10%.
-  locations
-    .filter(location => location.score >= 90)
-    .forEach(location => {
-      const marker = L.marker([location.lat, location.lng], {
-        icon: markerIcon(location.risk),
-        title: location.name
-      });
-      marker.bindPopup(popupHTML(location), {
-        closeButton: true,
-        offset: [0, -1]
-      });
-      marker.on("popupopen", event => {
-        activePopupMarker = marker;
-        event.popup
-          .getElement()
-          ?.querySelector(".learn-more")
-          ?.addEventListener("click", () => showDetails(location.id));
-      });
-      marker.addTo(markerLayer);
-      if (selectedId === location.id) activePopupMarker = marker;
-    });
-
+  renderRiskSurface();
+  renderPredictionMarkers();
   if (selectedId) showDetails(selectedId, false);
+}
+
+function renderZoomDependentLayers() {
+  renderPredictionMarkers();
 }
 
 function conciseExplanation(location) {
@@ -331,6 +472,19 @@ document.getElementById("home-map").addEventListener("click", () => {
   map.setView(naturalView.center, naturalView.zoom, { animate: true });
 });
 document.getElementById("close-details").addEventListener("click", closeDetails);
+map.on("zoomend", renderZoomDependentLayers);
+
+document.getElementById("toggle-pins").addEventListener("click", event => {
+  pinsVisible = !pinsVisible;
+  const button = event.currentTarget;
+  const label = pinsVisible ? "Hide pins" : "Show pins";
+  button.querySelector("span").textContent = label;
+  button.title = `${label} for higher-risk grids`;
+  button.setAttribute("aria-pressed", String(pinsVisible));
+  button.classList.toggle("pins-hidden", !pinsVisible);
+  if (!pinsVisible) map.closePopup();
+  renderPredictionMarkers();
+});
 
 document.querySelectorAll("[data-terrain]").forEach(button => {
   button.addEventListener("click", () => {
