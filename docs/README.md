@@ -1,47 +1,81 @@
-# RedZone interface demo
+# RedZone next-day prediction interface
 
-A standalone front-end mockup for a California wildfire-risk prediction project.
+This static site reads generated next-day CatBoost predictions from
+`docs/data/predictions.json`.
 
-## Run it
+## Generate predictions
 
-Because the map uses external browser resources, serve the folder locally rather than opening the HTML file directly:
+The model uses weather and other features dated **D** to predict a FIRMS
+hotspot detection on **D+1**. The weather inputs must contain D and enough
+recent prior dates to calculate rolling weather features.
+
+From the repository root:
 
 ```bash
-python3 -m http.server 8000
+.venv/bin/python scripts/09_download_daily_forecast.py
+
+.venv/bin/python scripts/10_build_daily_features.py \
+  --weather data/current/weather
+
+.venv/bin/python scripts/14_generate_website_predictions.py
+```
+
+The first command writes:
+
+```text
+data/current/weather/weather_through_YYYY-MM-DD.parquet
+```
+
+It requests 30 prior days plus the current day from Open-Meteo so the
+rolling features can be calculated on the first run. The feature builder
+writes:
+
+```text
+data/current/features/next_day_features.parquet
+```
+
+The prediction generator writes the browser-safe output:
+
+```text
+docs/data/predictions.json
+```
+
+Only load a trusted project-created `.joblib` model. Joblib artifacts use
+Python pickle internally and must not be accepted from website users.
+
+To test the pipeline with a historical feature date:
+
+```bash
+.venv/bin/python scripts/10_build_daily_features.py \
+  --weather data/processed/wildfire_training_2024.parquet \
+  --feature-date 2024-10-29
+
+.venv/bin/python scripts/14_generate_website_predictions.py
+```
+
+This historical command is only an integration check. The website will mark
+an old prediction date as stale.
+
+## Run the site
+
+Serve the repository's `docs` directory rather than opening `index.html`
+directly:
+
+```bash
+python3 -m http.server 8000 --directory docs
 ```
 
 Then open `http://localhost:8000`.
 
-## Current behavior
+## Interpretation
 
-- California-centered map with a limited surrounding buffer
-- Sample Northern California forest prediction points
-- Risk sections and map pins change from Now through 72 hours
-- Point popup and right-side details panel
-- Zoom, home, and terrain-detail controls
-- Laptop-first responsive layout
+- The displayed 0–100 score is a within-day relative-risk percentile.
+- It is not a calibrated probability that a wildfire will occur.
+- The prediction target is a satellite FIRMS hotspot detection in a grid
+  cell on the next calendar day.
+- Exact pins are shown for the top 10% of scored grids; the heat layer uses
+  all scored grids.
+- Temperature is shown in °C, wind in km/h, and precipitation in mm.
 
-## Connecting the real model
-
-Replace the `locations` sample array in `script.js` with API data. Keep each item shaped like this:
-
-```js
-{
-  id: "unique-id",
-  name: "Forest name",
-  area: "Region",
-  lat: 40.7,
-  lng: -122.6,
-  forestType: "Mixed conifer forest",
-  base: {
-    temperature: 82,
-    humidity: 37,
-    wind: 8,
-    rainfall: 0.05,
-    dryness: 62
-  },
-  trend: [56, 62, 70, 73, 66, 58]
-}
-```
-
-The six `trend` values correspond to Now, 6h, 12h, 24h, 48h, and 72h.
+The current model supports one next-calendar-day horizon. The site does not
+claim sub-daily, 48-hour, or 72-hour predictions.

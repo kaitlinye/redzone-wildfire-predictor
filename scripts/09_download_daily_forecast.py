@@ -1,6 +1,7 @@
-from datetime import date, timedelta
+from datetime import datetime
 from pathlib import Path
 import time
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -8,6 +9,9 @@ import requests
 
 GRID_FILE = Path(
     "data/interim/grid/california_grid_centroids.csv"
+)
+GRID_REFERENCE_FILE = Path(
+    "data/processed/wildfire_training_2024.parquet"
 )
 
 OUTPUT_FOLDER = Path("data/current/weather")
@@ -17,6 +21,7 @@ API_URL = "https://api.open-meteo.com/v1/forecast"
 
 BATCH_SIZE = 10
 WAIT_SECONDS = 10
+PAST_DAYS = 30
 
 DAILY_VARIABLES = [
     "temperature_2m_max",
@@ -32,7 +37,6 @@ DAILY_VARIABLES = [
 def download_batch(
     batch: pd.DataFrame,
     batch_number: int,
-    forecast_date: str,
 ) -> pd.DataFrame:
     latitudes = ",".join(
         batch["centroid_lat"].astype(str)
@@ -47,8 +51,8 @@ def download_batch(
         "longitude": longitudes,
         "daily": ",".join(DAILY_VARIABLES),
         "timezone": "America/Los_Angeles",
-        "start_date": forecast_date,
-        "end_date": forecast_date,
+        "past_days": PAST_DAYS,
+        "forecast_days": 1,
     }
 
     max_attempts = 5
@@ -91,6 +95,15 @@ def download_batch(
                 daily["centroid_lon"] = grid_row[
                     "centroid_lon"
                 ]
+                daily["weather_latitude"] = location_data.get(
+                    "latitude"
+                )
+                daily["weather_longitude"] = location_data.get(
+                    "longitude"
+                )
+                daily["elevation"] = location_data.get(
+                    "elevation"
+                )
 
                 tables.append(daily)
 
@@ -123,14 +136,17 @@ def download_batch(
         f"{max_attempts} attempts."
     )
 
+
 def main() -> None:
     forecast_date = (
-        date.today() + timedelta(days=1)
-    ).isoformat()
+        datetime.now(ZoneInfo("America/Los_Angeles"))
+        .date()
+        .isoformat()
+    )
 
     output_file = (
         OUTPUT_FOLDER
-        / f"forecast_{forecast_date}.parquet"
+        / f"weather_through_{forecast_date}.parquet"
     )
 
     if output_file.exists():
@@ -138,12 +154,30 @@ def main() -> None:
         print(output_file)
         return
 
-    if not GRID_FILE.exists():
-        raise FileNotFoundError(
-            f"Grid file was not found: {GRID_FILE}"
+    if GRID_FILE.exists():
+        grid = pd.read_csv(GRID_FILE)
+    elif GRID_REFERENCE_FILE.exists():
+        grid = (
+            pd.read_parquet(
+                GRID_REFERENCE_FILE,
+                columns=[
+                    "grid_id",
+                    "centroid_lat",
+                    "centroid_lon",
+                ],
+            )
+            .drop_duplicates("grid_id")
+            .reset_index(drop=True)
         )
-
-    grid = pd.read_csv(GRID_FILE)
+        print(
+            "Grid CSV was not found; using coordinates from "
+            f"{GRID_REFERENCE_FILE}."
+        )
+    else:
+        raise FileNotFoundError(
+            "No prediction grid was found. Checked "
+            f"{GRID_FILE} and {GRID_REFERENCE_FILE}."
+        )
 
     required_columns = {
         "grid_id",
@@ -168,7 +202,8 @@ def main() -> None:
     all_batches = []
 
     print(
-        f"Downloading forecast for {forecast_date}"
+        "Downloading weather through feature date "
+        f"{forecast_date} ({PAST_DAYS} prior days plus today)"
     )
     print(f"Grid cells: {len(grid):,}")
     print(f"Total batches: {total_batches}")
@@ -194,7 +229,6 @@ def main() -> None:
         batch_data = download_batch(
             batch=batch,
             batch_number=batch_number,
-            forecast_date=forecast_date,
         )
 
         all_batches.append(batch_data)

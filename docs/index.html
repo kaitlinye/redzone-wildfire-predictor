@@ -18,15 +18,10 @@
         <img class="brand-logo" src="redzone-logo.png" alt="RedZone" />
       </a>
 
-      <section class="time-control" aria-labelledby="time-title">
-        <div class="time-heading">
-          <span id="time-title">Prediction time</span>
-          <strong id="time-value">Now</strong>
-        </div>
-        <input id="time-slider" type="range" min="0" max="5" step="1" value="0" aria-label="Prediction time" />
-        <div class="time-ticks" aria-hidden="true">
-          <span>Now</span><span>6h</span><span>12h</span><span>24h</span><span>48h</span><span>72h</span>
-        </div>
+      <section class="forecast-summary" aria-labelledby="forecast-title">
+        <span id="forecast-title">Next-day FIRMS hotspot-detection risk</span>
+        <strong id="forecast-date">Loading predictions…</strong>
+        <small id="forecast-context">Reading the generated model output.</small>
       </section>
     </header>
 
@@ -60,15 +55,15 @@
           <span><i class="unavailable"></i>Not analyzed</span>
         </div>
 
-        <div class="sample-badge">Sample predictions</div>
+        <div id="prediction-status" class="sample-badge">Loading model predictions…</div>
       </section>
 
       <aside id="detail-panel" class="detail-panel" aria-live="polite" aria-label="Prediction details">
         <button id="close-details" class="close-details" type="button" aria-label="Close details">×</button>
         <div id="empty-state" class="empty-state">
           <div class="empty-pin">⌖</div>
-          <h1>Select a prediction point</h1>
-          <p>Click a map pin in a Northern California forest to view the exact risk and conditions.</p>
+          <h1>Select a higher-risk grid</h1>
+          <p>Click a map pin to inspect its next-day relative-risk ranking and model inputs.</p>
         </div>
         <div id="detail-content" class="detail-content" hidden></div>
       </aside>
