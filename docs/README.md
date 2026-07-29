@@ -73,8 +73,10 @@ Then open `http://localhost:8000`.
 - It is not a calibrated probability that a wildfire will occur.
 - The prediction target is a satellite FIRMS hotspot detection in a grid
   cell on the next calendar day.
-- Pins are shown for grids strictly above the 90th percentile; the colored
-  risk surface uses all scored grids.
+- Every analyzed grid is available as a pin. Pins are clustered at lower
+  zoom levels and can be filtered by risk tier. Low-tier pins are hidden by
+  default, while Medium, High, and Extreme are enabled. The colored risk
+  surface always uses all scored grids.
 - Temperature is shown in °C, wind in km/h, and precipitation in mm.
 
 The current model supports one next-calendar-day horizon. The site does not

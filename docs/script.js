@@ -14,6 +14,11 @@ let selectedId = null;
 let activePopupMarker = null;
 let riskSurfaceLayer = null;
 let pinsVisible = true;
+const visiblePinRisks = new Set([
+  "Medium",
+  "High",
+  "Extreme"
+]);
 
 const californiaBounds = L.latLngBounds([31.8, -125.1], [42.7, -113.7]);
 const naturalView = { center: [38.35, -120.5], zoom: 6 };
@@ -188,16 +193,12 @@ function addIndividualMarker(location) {
     icon: markerIcon(location.risk),
     title: location.name
   });
-  marker.bindPopup(popupHTML(location), {
+  marker.bindPopup(popupContent(location), {
     closeButton: true,
     offset: [0, -1]
   });
-  marker.on("popupopen", event => {
+  marker.on("popupopen", () => {
     activePopupMarker = marker;
-    event.popup
-      .getElement()
-      ?.querySelector(".learn-more")
-      ?.addEventListener("click", () => showDetails(location.id));
   });
   marker.addTo(markerLayer);
   if (selectedId === location.id) activePopupMarker = marker;
@@ -235,10 +236,20 @@ function renderPredictionMarkers() {
   activePopupMarker = null;
   if (!pinsVisible) return;
 
-  const higherRiskLocations = locations.filter(
-    location => location.score > 90
+  let pinLocations = locations.filter(
+    location => visiblePinRisks.has(location.risk)
   );
-  groupLocationsForZoom(higherRiskLocations).forEach(group => {
+
+  // At close zooms, render only the visible neighborhood so thousands of
+  // DOM markers do not slow down panning while every grid remains available.
+  if (map.getZoom() >= 9) {
+    const visibleBounds = map.getBounds().pad(0.25);
+    pinLocations = pinLocations.filter(location => (
+      visibleBounds.contains([location.lat, location.lng])
+    ));
+  }
+
+  groupLocationsForZoom(pinLocations).forEach(group => {
     if (group.length === 1) {
       addIndividualMarker(group[0]);
     } else {
@@ -312,7 +323,7 @@ function renderRiskSurface() {
   riskSurfaceLayer.addTo(map);
 }
 
-function popupHTML(location) {
+function popupContent(location) {
   const node = document.getElementById("popup-template").content.cloneNode(true);
   node.querySelector(".popup-risk").textContent =
     `${location.risk.toUpperCase()} — ${location.score.toFixed(1)} percentile`;
@@ -340,19 +351,20 @@ function popupHTML(location) {
 
   const button = node.querySelector(".learn-more");
   button.dataset.id = location.id;
+  button.addEventListener("click", event => {
+    L.DomEvent.stop(event);
+    showDetails(location.id);
+    map.closePopup();
+  });
   const wrapper = document.createElement("div");
   wrapper.appendChild(node);
-  return wrapper.innerHTML;
+  return wrapper;
 }
 
 function renderMapData() {
   renderRiskSurface();
   renderPredictionMarkers();
   if (selectedId) showDetails(selectedId, false);
-}
-
-function renderZoomDependentLayers() {
-  renderPredictionMarkers();
 }
 
 function conciseExplanation(location) {
@@ -371,6 +383,7 @@ function showDetails(id, openPanel = true) {
   selectedId = id;
 
   document.getElementById("empty-state").hidden = true;
+  document.getElementById("close-details").hidden = false;
   const detail = document.getElementById("detail-content");
   detail.hidden = false;
   detail.innerHTML = `
@@ -383,6 +396,15 @@ function showDetails(id, openPanel = true) {
       </div>
       <span class="risk-symbol">▲</span>
     </div>
+    <section class="detail-section">
+      <h2>Grid and relative ranking</h2>
+      <dl class="conditions-list">
+        <div><dt>Risk tier</dt><dd>${escapeHTML(location.risk)}</dd></div>
+        <div><dt>Statewide percentile</dt><dd>${location.score.toFixed(1)}</dd></div>
+        <div><dt>Grid center</dt><dd>${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}</dd></div>
+      </dl>
+      <p class="ranking-explanation">For this forecast date, the model ranked this grid at the ${location.score.toFixed(1)} percentile compared with the other analyzed California grids. This is relative risk, not wildfire probability.</p>
+    </section>
     <section class="detail-section">
       <h2>Forecast conditions used by the model</h2>
       <dl class="conditions-list">
@@ -410,6 +432,7 @@ function closeDetails() {
   document.getElementById("detail-content").hidden = true;
   document.getElementById("detail-content").innerHTML = "";
   document.getElementById("empty-state").hidden = false;
+  document.getElementById("close-details").hidden = true;
   map.closePopup();
 }
 
@@ -472,18 +495,31 @@ document.getElementById("home-map").addEventListener("click", () => {
   map.setView(naturalView.center, naturalView.zoom, { animate: true });
 });
 document.getElementById("close-details").addEventListener("click", closeDetails);
-map.on("zoomend", renderZoomDependentLayers);
+map.on("moveend", renderPredictionMarkers);
 
 document.getElementById("toggle-pins").addEventListener("click", event => {
   pinsVisible = !pinsVisible;
   const button = event.currentTarget;
   const label = pinsVisible ? "Hide pins" : "Show pins";
   button.querySelector("span").textContent = label;
-  button.title = `${label} for higher-risk grids`;
+  button.title = `${label} for prediction grids`;
   button.setAttribute("aria-pressed", String(pinsVisible));
   button.classList.toggle("pins-hidden", !pinsVisible);
   if (!pinsVisible) map.closePopup();
   renderPredictionMarkers();
+});
+
+document.querySelectorAll("[data-pin-tier]").forEach(checkbox => {
+  checkbox.addEventListener("change", event => {
+    const tier = event.currentTarget.dataset.pinTier;
+    if (event.currentTarget.checked) {
+      visiblePinRisks.add(tier);
+    } else {
+      visiblePinRisks.delete(tier);
+    }
+    map.closePopup();
+    renderPredictionMarkers();
+  });
 });
 
 document.querySelectorAll("[data-terrain]").forEach(button => {
