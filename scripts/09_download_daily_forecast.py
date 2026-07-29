@@ -26,12 +26,12 @@ LEGACY_WEATHER_FOLDER = Path("data/current/weather")
 API_URL = "https://api.open-meteo.com/v1/forecast"
 
 BATCH_SIZE = int(
-    os.environ.get("OPEN_METEO_BATCH_SIZE", "25")
+    os.environ.get("OPEN_METEO_BATCH_SIZE", "100")
 )
 WAIT_SECONDS = float(
-    os.environ.get("OPEN_METEO_WAIT_SECONDS", "1")
+    os.environ.get("OPEN_METEO_WAIT_SECONDS", "12")
 )
-PAST_DAYS = 7
+PAST_DAYS = 2
 HISTORY_DAYS = 30
 
 DAILY_VARIABLES = [
@@ -66,14 +66,14 @@ def download_batch(
         "forecast_days": 1,
     }
 
-    max_attempts = 5
+    max_attempts = 4
 
     for attempt in range(1, max_attempts + 1):
         try:
             response = requests.get(
                 API_URL,
                 params=params,
-                timeout=300,
+                timeout=120,
             )
 
             if response.status_code == 429:
@@ -304,6 +304,11 @@ def main() -> None:
     )
     print(f"Grid cells: {len(grid):,}")
     print(f"Total batches: {total_batches}")
+    print(
+        "Planned pacing time: "
+        f"{max(0, total_batches - 1) * WAIT_SECONDS / 60:.1f} "
+        "minutes, plus API response time"
+    )
 
     for start in range(
         0,

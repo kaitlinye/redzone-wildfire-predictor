@@ -26,7 +26,7 @@ The first command writes:
 data/current/weather/recent_weather.parquet
 ```
 
-It requests the latest seven prior days plus the current day from
+It requests the latest two prior days plus the current day from
 Open-Meteo, merges them into the retained weather history, and keeps the
 31 dates needed for rolling features. Retaining this file prevents every
 daily run from redownloading a full month for all 4,355 grids. The feature
@@ -97,7 +97,7 @@ from the repository's **Actions** tab. It:
 
 The same commit also retains
 `data/current/weather/recent_weather.parquet`, allowing the next run to
-request only the latest eight-day window rather than downloading an entire
+request only the latest three-day window rather than downloading an entire
 month again.
 
 The workflow performs inference only. It does not retrain or replace the
