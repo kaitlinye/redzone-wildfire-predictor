@@ -85,8 +85,8 @@ claim sub-daily, 48-hour, or 72-hour predictions.
 ## Automatic daily updates
 
 `.github/workflows/update-daily-predictions.yml` runs every day at
-13:30 UTC (05:30 PST or 06:30 PDT) and can also be started manually from
-the repository's **Actions** tab. It:
+08:00 UTC (12:00 AM PST or 01:00 AM PDT) and can also be started manually
+from the repository's **Actions** tab. It:
 
 1. downloads the current Open-Meteo forecast and recent weather history;
 2. builds the rolling and static model features;

@@ -2,8 +2,8 @@ name: Update daily predictions
 
 on:
   schedule:
-    # 05:30 PST / 06:30 PDT. GitHub schedules always use UTC.
-    - cron: "30 13 * * *"
+    # 12:00 AM PST / 01:00 AM PDT. GitHub schedules always use UTC.
+    - cron: "0 8 * * *"
   workflow_dispatch:
   push:
     branches:
