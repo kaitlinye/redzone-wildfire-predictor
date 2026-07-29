@@ -39,7 +39,9 @@ jobs:
         run: python scripts/09_download_daily_forecast.py
 
       - name: Build next-day features
-        run: python scripts/10_build_daily_features.py
+        run: >-
+          python scripts/10_build_daily_features.py
+          --weather data/current/weather/recent_weather.parquet
 
       - name: Generate website predictions
         run: python scripts/14_generate_website_predictions.py
@@ -48,7 +50,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/data/predictions.json
+          git add \
+            data/current/weather/recent_weather.parquet \
+            docs/data/predictions.json
           if git diff --cached --quiet; then
             echo "Prediction JSON is unchanged."
           else

@@ -26,6 +26,22 @@ assert SPEC.loader is not None
 GENERATOR = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(GENERATOR)
 
+DOWNLOADER_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "09_download_daily_forecast.py"
+)
+DOWNLOADER_SPEC = importlib.util.spec_from_file_location(
+    "daily_weather_downloader",
+    DOWNLOADER_PATH,
+)
+assert DOWNLOADER_SPEC is not None
+assert DOWNLOADER_SPEC.loader is not None
+DOWNLOADER = importlib.util.module_from_spec(
+    DOWNLOADER_SPEC
+)
+DOWNLOADER_SPEC.loader.exec_module(DOWNLOADER)
+
 
 class FakeModel:
     def predict_proba(
@@ -184,6 +200,39 @@ class NextDayPredictionTests(unittest.TestCase):
         self.assertIn(
             "not calibrated",
             payload["score_semantics"],
+        )
+
+    def test_weather_history_is_merged_revised_and_trimmed(
+        self,
+    ) -> None:
+        existing = pd.DataFrame(
+            {
+                "grid_id": ["CA-00001", "CA-00001"],
+                "date": ["2024-01-01", "2024-01-31"],
+                "temperature_max": [10.0, 20.0],
+            }
+        )
+        downloaded = pd.DataFrame(
+            {
+                "grid_id": ["CA-00001", "CA-00001"],
+                "date": ["2024-01-31", "2024-02-01"],
+                "temperature_max": [21.0, 22.0],
+            }
+        )
+
+        result = DOWNLOADER.update_weather_history(
+            existing,
+            downloaded,
+            forecast_date="2024-02-01",
+        )
+
+        self.assertEqual(
+            result["date"].dt.date.astype(str).tolist(),
+            ["2024-01-31", "2024-02-01"],
+        )
+        self.assertEqual(
+            result["temperature_max"].tolist(),
+            [21.0, 22.0],
         )
 
 

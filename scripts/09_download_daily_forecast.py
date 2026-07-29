@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 from pathlib import Path
 import time
 from zoneinfo import ZoneInfo
@@ -17,14 +18,21 @@ GRID_REFERENCE_FILE = Path(
     "data/processed/wildfire_training_2024.parquet"
 )
 
-OUTPUT_FOLDER = Path("data/current/weather")
-OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
+OUTPUT_FILE = Path(
+    "data/current/weather/recent_weather.parquet"
+)
+LEGACY_WEATHER_FOLDER = Path("data/current/weather")
 
 API_URL = "https://api.open-meteo.com/v1/forecast"
 
-BATCH_SIZE = 10
-WAIT_SECONDS = 10
-PAST_DAYS = 30
+BATCH_SIZE = int(
+    os.environ.get("OPEN_METEO_BATCH_SIZE", "25")
+)
+WAIT_SECONDS = float(
+    os.environ.get("OPEN_METEO_WAIT_SECONDS", "1")
+)
+PAST_DAYS = 7
+HISTORY_DAYS = 30
 
 DAILY_VARIABLES = [
     "temperature_2m_max",
@@ -72,8 +80,11 @@ def download_batch(
                 print(
                     f"Batch {batch_number} was rate-limited."
                 )
-                print("Waiting 10 minutes...")
-                time.sleep(600)
+                wait_seconds = min(60 * attempt, 300)
+                print(
+                    f"Waiting {wait_seconds} seconds..."
+                )
+                time.sleep(wait_seconds)
                 continue
 
             response.raise_for_status()
@@ -81,6 +92,13 @@ def download_batch(
 
             if isinstance(payload, dict):
                 payload = [payload]
+
+            if len(payload) != len(batch):
+                raise ValueError(
+                    "Open-Meteo returned "
+                    f"{len(payload)} locations for a "
+                    f"{len(batch)}-location batch."
+                )
 
             tables = []
 
@@ -140,6 +158,65 @@ def download_batch(
     )
 
 
+def load_existing_history() -> pd.DataFrame:
+    if OUTPUT_FILE.exists():
+        return pd.read_parquet(OUTPUT_FILE)
+
+    legacy_files = sorted(
+        path
+        for path in LEGACY_WEATHER_FOLDER.glob(
+            "weather_through_*.parquet"
+        )
+        if path != OUTPUT_FILE
+    )
+    if not legacy_files:
+        raise FileNotFoundError(
+            "No recent weather history was found. The recurring "
+            f"pipeline requires {OUTPUT_FILE} or a legacy "
+            "weather_through_YYYY-MM-DD.parquet bootstrap file."
+        )
+
+    bootstrap_path = legacy_files[-1]
+    print(
+        "Using legacy weather history as bootstrap: "
+        f"{bootstrap_path}"
+    )
+    return pd.read_parquet(bootstrap_path)
+
+
+def update_weather_history(
+    existing: pd.DataFrame,
+    downloaded: pd.DataFrame,
+    forecast_date: str,
+) -> pd.DataFrame:
+    combined = pd.concat(
+        [existing, downloaded],
+        ignore_index=True,
+    )
+    combined["date"] = (
+        pd.to_datetime(combined["date"])
+        .dt.tz_localize(None)
+        .dt.normalize()
+    )
+    combined = (
+        combined.drop_duplicates(
+            ["grid_id", "date"],
+            keep="last",
+        )
+        .sort_values(["grid_id", "date"])
+        .reset_index(drop=True)
+    )
+
+    end_date = pd.Timestamp(forecast_date)
+    start_date = end_date - pd.Timedelta(
+        days=HISTORY_DAYS
+    )
+    return combined.loc[
+        (combined["date"] >= start_date)
+        & (combined["date"] <= end_date)
+    ].reset_index(drop=True)
+
+
 def main() -> None:
     forecast_date = (
         datetime.now(ZoneInfo("America/Los_Angeles"))
@@ -147,15 +224,10 @@ def main() -> None:
         .isoformat()
     )
 
-    output_file = (
-        OUTPUT_FOLDER
-        / f"weather_through_{forecast_date}.parquet"
+    existing_history = load_existing_history()
+    existing_history["date"] = pd.to_datetime(
+        existing_history["date"]
     )
-
-    if output_file.exists():
-        print("Forecast already downloaded:")
-        print(output_file)
-        return
 
     if INFERENCE_GRID_FILE.exists():
         grid = pd.read_parquet(
@@ -207,6 +279,18 @@ def main() -> None:
             "The grid file is missing columns: "
             + ", ".join(sorted(missing_columns))
         )
+
+    current_rows = existing_history.loc[
+        existing_history["date"].dt.normalize()
+        == pd.Timestamp(forecast_date)
+    ]
+    if (
+        current_rows["grid_id"].nunique()
+        == grid["grid_id"].nunique()
+    ):
+        print("Current forecast is already complete:")
+        print(OUTPUT_FILE)
+        return
 
     total_batches = (
         len(grid) + BATCH_SIZE - 1
@@ -278,15 +362,24 @@ def main() -> None:
         forecast["date"]
     )
 
-    forecast.to_parquet(
-        output_file,
-        index=False,
+    history = update_weather_history(
+        existing=existing_history,
+        downloaded=forecast,
+        forecast_date=forecast_date,
     )
+
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary_file = OUTPUT_FILE.with_suffix(
+        ".parquet.tmp"
+    )
+    history.to_parquet(temporary_file, index=False)
+    temporary_file.replace(OUTPUT_FILE)
 
     print()
     print("Download complete.")
-    print(f"Saved to: {output_file}")
-    print(f"Rows: {len(forecast):,}")
+    print(f"Saved to: {OUTPUT_FILE}")
+    print(f"Downloaded rows: {len(forecast):,}")
+    print(f"Retained history rows: {len(history):,}")
     print(
         "Unique grid cells: "
         f"{forecast['grid_id'].nunique():,}"

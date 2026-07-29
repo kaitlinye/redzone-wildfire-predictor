@@ -23,12 +23,14 @@ From the repository root:
 The first command writes:
 
 ```text
-data/current/weather/weather_through_YYYY-MM-DD.parquet
+data/current/weather/recent_weather.parquet
 ```
 
-It requests 30 prior days plus the current day from Open-Meteo so the
-rolling features can be calculated on the first run. The feature builder
-writes:
+It requests the latest seven prior days plus the current day from
+Open-Meteo, merges them into the retained weather history, and keeps the
+31 dates needed for rolling features. Retaining this file prevents every
+daily run from redownloading a full month for all 4,355 grids. The feature
+builder writes:
 
 ```text
 data/current/features/next_day_features.parquet
@@ -92,6 +94,11 @@ from the repository's **Actions** tab. It:
 2. builds the rolling and static model features;
 3. runs the saved CatBoost model;
 4. commits the updated `docs/data/predictions.json`.
+
+The same commit also retains
+`data/current/weather/recent_weather.parquet`, allowing the next run to
+request only the latest eight-day window rather than downloading an entire
+month again.
 
 The workflow performs inference only. It does not retrain or replace the
 saved model.
