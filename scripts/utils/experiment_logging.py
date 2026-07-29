@@ -86,6 +86,20 @@ def save_experiment_results(
 
     write_header = not results_path.exists()
 
+    if not write_header:
+        existing_columns = pd.read_csv(
+            results_path,
+            nrows=0,
+        ).columns.tolist()
+        expected_columns = result_row.columns.tolist()
+
+        if existing_columns != expected_columns:
+            raise ValueError(
+                "Experiment results CSV has an incompatible "
+                f"header. Expected {expected_columns}, found "
+                f"{existing_columns}."
+            )
+
     result_row.to_csv(
         results_path,
         mode="a",
