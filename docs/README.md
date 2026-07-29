@@ -73,9 +73,34 @@ Then open `http://localhost:8000`.
 - It is not a calibrated probability that a wildfire will occur.
 - The prediction target is a satellite FIRMS hotspot detection in a grid
   cell on the next calendar day.
-- Exact pins are shown for the top 10% of scored grids; the heat layer uses
-  all scored grids.
+- Pins are shown for grids strictly above the 90th percentile; the colored
+  risk surface uses all scored grids.
 - Temperature is shown in °C, wind in km/h, and precipitation in mm.
 
 The current model supports one next-calendar-day horizon. The site does not
 claim sub-daily, 48-hour, or 72-hour predictions.
+
+## Automatic daily updates
+
+`.github/workflows/update-daily-predictions.yml` runs every day at
+13:30 UTC (05:30 PST or 06:30 PDT) and can also be started manually from
+the repository's **Actions** tab. It:
+
+1. downloads the current Open-Meteo forecast and recent weather history;
+2. builds the rolling and static model features;
+3. runs the saved CatBoost model;
+4. commits the updated `docs/data/predictions.json`; and
+5. deploys the `docs` directory to GitHub Pages.
+
+The workflow performs inference only. It does not retrain or replace the
+saved model.
+
+Before the first run, open the repository settings:
+
+- Under **Pages**, set the deployment source to **GitHub Actions**.
+- Under **Actions → General → Workflow permissions**, select
+  **Read and write permissions**.
+
+If a scheduled update fails, the last successful Pages deployment remains
+online. Inspect the failed run in the Actions tab and rerun it after fixing
+the download or configuration problem.

@@ -7,7 +7,10 @@ import pandas as pd
 import requests
 
 
-GRID_FILE = Path(
+INFERENCE_GRID_FILE = Path(
+    "data/inference/california_prediction_grid.parquet"
+)
+LEGACY_GRID_FILE = Path(
     "data/interim/grid/california_grid_centroids.csv"
 )
 GRID_REFERENCE_FILE = Path(
@@ -154,8 +157,17 @@ def main() -> None:
         print(output_file)
         return
 
-    if GRID_FILE.exists():
-        grid = pd.read_csv(GRID_FILE)
+    if INFERENCE_GRID_FILE.exists():
+        grid = pd.read_parquet(
+            INFERENCE_GRID_FILE,
+            columns=[
+                "grid_id",
+                "centroid_lat",
+                "centroid_lon",
+            ],
+        )
+    elif LEGACY_GRID_FILE.exists():
+        grid = pd.read_csv(LEGACY_GRID_FILE)
     elif GRID_REFERENCE_FILE.exists():
         grid = (
             pd.read_parquet(
@@ -176,7 +188,8 @@ def main() -> None:
     else:
         raise FileNotFoundError(
             "No prediction grid was found. Checked "
-            f"{GRID_FILE} and {GRID_REFERENCE_FILE}."
+            f"{INFERENCE_GRID_FILE}, {LEGACY_GRID_FILE}, and "
+            f"{GRID_REFERENCE_FILE}."
         )
 
     required_columns = {

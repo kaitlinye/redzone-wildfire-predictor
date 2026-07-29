@@ -19,15 +19,12 @@ from scripts.utils.next_day_features import (
 
 
 DEFAULT_WEATHER_INPUT = Path("data/current/weather")
-DEFAULT_REFERENCE_PATH = Path(
-    "data/processed/wildfire_training_2024.parquet"
+DEFAULT_INFERENCE_GRID_PATH = Path(
+    "data/inference/california_prediction_grid.parquet"
 )
-DEFAULT_LANDFIRE_PATH = Path(
-    "data/processed/california_landfire_by_grid_2024.parquet"
-)
-DEFAULT_HISTORICAL_PATH = Path(
-    "data/processed/historical_firms_by_grid_2020_2023.parquet"
-)
+DEFAULT_REFERENCE_PATH = DEFAULT_INFERENCE_GRID_PATH
+DEFAULT_LANDFIRE_PATH = DEFAULT_INFERENCE_GRID_PATH
+DEFAULT_HISTORICAL_PATH = DEFAULT_INFERENCE_GRID_PATH
 DEFAULT_OUTPUT_PATH = Path(
     "data/current/features/next_day_features.parquet"
 )
