@@ -19,6 +19,7 @@ DEFAULT_MODEL_PATH = Path(
 DEFAULT_OUTPUT_PATH = Path(
     "docs/data/predictions.json"
 )
+EXPECTED_WEBSITE_GRID_COUNT = 4_355
 
 DISPLAY_COLUMNS = [
     "grid_id",
@@ -99,6 +100,7 @@ def build_prediction_payload(
     features: pd.DataFrame,
     artifact: dict,
     model_name: str,
+    expected_grid_count: int | None = None,
 ) -> dict:
     required_artifact_keys = {
         "model",
@@ -127,6 +129,27 @@ def build_prediction_payload(
             "Inference features are missing columns: "
             f"{missing_columns}"
         )
+    if features["grid_id"].isna().any():
+        raise ValueError(
+            "Inference features contain missing grid IDs."
+        )
+    duplicate_grid_ids = int(
+        features["grid_id"].duplicated().sum()
+    )
+    if duplicate_grid_ids:
+        raise ValueError(
+            "Inference features contain "
+            f"{duplicate_grid_ids:,} duplicate grid IDs."
+        )
+    if (
+        expected_grid_count is not None
+        and len(features) != expected_grid_count
+    ):
+        raise ValueError(
+            "Inference grid count is incorrect: expected "
+            f"{expected_grid_count:,}, received "
+            f"{len(features):,}."
+        )
 
     feature_date = _single_date(features, "feature_date")
     prediction_date = _single_date(
@@ -153,7 +176,19 @@ def build_prediction_payload(
         )
 
     model_scores = artifact["model"].predict_proba(X)[:, 1]
+    if (
+        len(model_scores) != len(features)
+        or not np.isfinite(model_scores).all()
+    ):
+        raise ValueError(
+            "Model inference returned missing, infinite, or "
+            "incorrectly sized scores."
+        )
     percentiles = daily_percentile(model_scores)
+    if not np.isfinite(percentiles).all():
+        raise ValueError(
+            "Daily percentile conversion returned invalid scores."
+        )
     threshold = float(artifact["threshold"])
 
     locations = []
@@ -250,6 +285,7 @@ def main() -> None:
         features=features,
         artifact=artifact,
         model_name=args.model.stem,
+        expected_grid_count=EXPECTED_WEBSITE_GRID_COUNT,
     )
     write_payload(payload, args.output)
 

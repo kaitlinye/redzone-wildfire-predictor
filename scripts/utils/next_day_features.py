@@ -298,6 +298,24 @@ def build_next_day_features(
         weather,
         reference_data,
     )
+    expected_grid_ids = set(reference["grid_id"])
+    current_grid_ids = set(current["grid_id"])
+    missing_current_grids = sorted(
+        expected_grid_ids - current_grid_ids
+    )
+    unexpected_current_grids = sorted(
+        current_grid_ids - expected_grid_ids
+    )
+    if missing_current_grids or unexpected_current_grids:
+        raise ValueError(
+            "Feature-date weather grid coverage does not match "
+            "the prediction reference. "
+            f"Missing grids: {len(missing_current_grids):,}; "
+            f"unexpected grids: {len(unexpected_current_grids):,}. "
+            "Example missing grid IDs: "
+            f"{missing_current_grids[:10]}"
+        )
+
     landfire_features = _one_row_per_grid(
         landfire,
         LANDFIRE_COLUMNS,

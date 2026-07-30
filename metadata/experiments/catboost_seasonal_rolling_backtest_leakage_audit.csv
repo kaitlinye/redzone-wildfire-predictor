@@ -1,0 +1,6 @@
+check,passed,evidence
+prior_year_mapping,True,Every history_year equals feature_year - 1.
+prior_year_window_precedes_features,True,Every May-October history window ends before January 1 of its feature year.
+prior_year_grid_coverage,True,"2023 and 2024 each map prior-year history to 4,355 grids."
+rolling_weather_past_only_2023,True,Changing weather on and after 2023-08-04 did not change that date's rolling features.
+rolling_weather_past_only_2024,True,Changing weather on and after 2024-08-03 did not change that date's rolling features.

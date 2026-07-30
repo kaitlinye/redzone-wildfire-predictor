@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import math
 from pathlib import Path
 import unittest
 
@@ -57,6 +59,15 @@ class FakeModel:
         return np.column_stack([1 - scores, scores])
 
 
+class InvalidScoreModel:
+    def predict_proba(
+        self,
+        features: pd.DataFrame,
+    ) -> np.ndarray:
+        scores = np.full(len(features), np.nan)
+        return np.column_stack([scores, scores])
+
+
 class NextDayPredictionTests(unittest.TestCase):
     def setUp(self) -> None:
         dates = pd.date_range(
@@ -107,6 +118,18 @@ class NextDayPredictionTests(unittest.TestCase):
                     9,
                 ],
             }
+        )
+        self.reference = (
+            self.weather[
+                [
+                    "grid_id",
+                    "elevation",
+                    "centroid_lat",
+                    "centroid_lon",
+                ]
+            ]
+            .drop_duplicates("grid_id")
+            .reset_index(drop=True)
         )
 
     def test_feature_date_predicts_exactly_next_day(self) -> None:
@@ -201,6 +224,238 @@ class NextDayPredictionTests(unittest.TestCase):
             "not calibrated",
             payload["score_semantics"],
         )
+
+    def test_rolling_features_ignore_current_and_future_weather(
+        self,
+    ) -> None:
+        feature_date = "2024-01-20"
+        baseline = build_next_day_features(
+            weather=self.weather,
+            landfire=self.landfire,
+            historical_firms=self.historical,
+            reference_data=self.reference,
+            feature_date=feature_date,
+        )
+        changed = self.weather.copy()
+        changed.loc[
+            changed["date"] >= feature_date,
+            [
+                "precipitation_total",
+                "temperature_max",
+                "humidity_min",
+            ],
+        ] = [9999, 9999, -9999]
+        perturbed = build_next_day_features(
+            weather=changed,
+            landfire=self.landfire,
+            historical_firms=self.historical,
+            reference_data=self.reference,
+            feature_date=feature_date,
+        )
+
+        rolling_columns = [
+            "rain_previous_7d",
+            "rain_previous_30d",
+            "temperature_max_previous_3d",
+            "humidity_min_previous_3d",
+        ]
+        pd.testing.assert_frame_equal(
+            baseline[rolling_columns],
+            perturbed[rolling_columns],
+        )
+
+    def test_duplicate_feature_date_weather_is_rejected(
+        self,
+    ) -> None:
+        duplicate = self.weather[
+            (self.weather["grid_id"] == "CA-00001")
+            & (self.weather["date"] == "2024-01-31")
+        ]
+        weather = pd.concat(
+            [self.weather, duplicate],
+            ignore_index=True,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "duplicate grid IDs",
+        ):
+            build_next_day_features(
+                weather=weather,
+                landfire=self.landfire,
+                historical_firms=self.historical,
+                reference_data=self.reference,
+                feature_date="2024-01-31",
+            )
+
+    def test_missing_feature_date_grid_is_rejected(
+        self,
+    ) -> None:
+        weather = self.weather.loc[
+            ~(
+                (self.weather["grid_id"] == "CA-00002")
+                & (self.weather["date"] == "2024-01-31")
+            )
+        ].copy()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Missing grids: 1",
+        ):
+            build_next_day_features(
+                weather=weather,
+                landfire=self.landfire,
+                historical_firms=self.historical,
+                reference_data=self.reference,
+                feature_date="2024-01-31",
+            )
+
+    def test_incomplete_feature_date_weather_is_rejected(
+        self,
+    ) -> None:
+        weather = self.weather.copy()
+        weather.loc[
+            (weather["grid_id"] == "CA-00001")
+            & (weather["date"] == "2024-01-31"),
+            "humidity_min",
+        ] = np.nan
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "missing static, current, or rolling inputs",
+        ):
+            build_next_day_features(
+                weather=weather,
+                landfire=self.landfire,
+                historical_firms=self.historical,
+                reference_data=self.reference,
+                feature_date="2024-01-31",
+            )
+
+    def test_duplicate_inference_grid_is_rejected(self) -> None:
+        features = build_next_day_features(
+            weather=self.weather,
+            landfire=self.landfire,
+            historical_firms=self.historical,
+            reference_data=self.reference,
+            feature_date="2024-01-31",
+        )
+        features = pd.concat(
+            [features, features.iloc[[0]]],
+            ignore_index=True,
+        )
+        artifact = self._fake_artifact(FakeModel())
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "duplicate grid IDs",
+        ):
+            GENERATOR.build_prediction_payload(
+                features,
+                artifact,
+                "test_model",
+            )
+
+    def test_incorrect_inference_grid_count_is_rejected(
+        self,
+    ) -> None:
+        features = build_next_day_features(
+            weather=self.weather,
+            landfire=self.landfire,
+            historical_firms=self.historical,
+            reference_data=self.reference,
+            feature_date="2024-01-31",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "expected 4,355, received 2",
+        ):
+            GENERATOR.build_prediction_payload(
+                features,
+                self._fake_artifact(FakeModel()),
+                "test_model",
+                expected_grid_count=4_355,
+            )
+
+    def test_invalid_model_scores_are_rejected(self) -> None:
+        features = build_next_day_features(
+            weather=self.weather,
+            landfire=self.landfire,
+            historical_firms=self.historical,
+            reference_data=self.reference,
+            feature_date="2024-01-31",
+        )
+        artifact = self._fake_artifact(
+            InvalidScoreModel()
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "missing, infinite",
+        ):
+            GENERATOR.build_prediction_payload(
+                features,
+                artifact,
+                "invalid_model",
+            )
+
+    def test_published_inference_has_all_grids_and_scores(
+        self,
+    ) -> None:
+        prediction_path = (
+            Path(__file__).resolve().parents[1]
+            / "docs"
+            / "data"
+            / "predictions.json"
+        )
+        payload = json.loads(
+            prediction_path.read_text(encoding="utf-8")
+        )
+        locations = payload["locations"]
+        grid_ids = [item["id"] for item in locations]
+
+        self.assertEqual(payload["grid_count"], 4_355)
+        self.assertEqual(len(locations), 4_355)
+        self.assertEqual(len(set(grid_ids)), 4_355)
+        self.assertTrue(
+            all(
+                math.isfinite(item["model_score"])
+                and math.isfinite(item["risk_score"])
+                for item in locations
+            )
+        )
+
+    @staticmethod
+    def _fake_artifact(model: object) -> dict:
+        return {
+            "model": model,
+            "threshold": 0.05,
+            "feature_columns": [
+                "temperature_max",
+                "temperature_min",
+                "humidity_mean",
+                "humidity_min",
+                "precipitation_total",
+                "wind_speed_max",
+                "elevation",
+                "vegetation_cover_mean",
+                "rain_previous_7d",
+                "rain_previous_30d",
+                "temperature_max_previous_3d",
+                "humidity_min_previous_3d",
+                "historical_firms_detection_count_log",
+                "wind_direction_dominant",
+                "fuel_model_dominant",
+                "landfire_missing",
+            ],
+            "categorical_features": [
+                "wind_direction_dominant",
+                "fuel_model_dominant",
+                "landfire_missing",
+            ],
+            "categorical_missing_value": "__MISSING__",
+        }
 
     def test_weather_history_is_merged_revised_and_trimmed(
         self,
