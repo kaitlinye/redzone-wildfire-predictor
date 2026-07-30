@@ -39,6 +39,7 @@ jobs:
         env:
           OPEN_METEO_BATCH_SIZE: "100"
           OPEN_METEO_WAIT_SECONDS: "12"
+          OPEN_METEO_MAX_WORKERS: "8"
         run: python scripts/09_download_daily_forecast.py
 
       - name: Build next-day features

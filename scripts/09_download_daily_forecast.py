@@ -1,6 +1,11 @@
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)
 from datetime import datetime
 import os
 from pathlib import Path
+import threading
 import time
 from zoneinfo import ZoneInfo
 
@@ -31,6 +36,9 @@ BATCH_SIZE = int(
 WAIT_SECONDS = float(
     os.environ.get("OPEN_METEO_WAIT_SECONDS", "12")
 )
+MAX_WORKERS = int(
+    os.environ.get("OPEN_METEO_MAX_WORKERS", "8")
+)
 PAST_DAYS = 2
 HISTORY_DAYS = 30
 
@@ -43,6 +51,26 @@ DAILY_VARIABLES = [
     "wind_speed_10m_max",
     "wind_direction_10m_dominant",
 ]
+
+
+class RequestPacer:
+    """Reserve request start times while responses run concurrently."""
+
+    def __init__(self, interval_seconds: float) -> None:
+        self.interval_seconds = interval_seconds
+        self.next_start = 0.0
+        self.lock = threading.Lock()
+
+    def wait_for_slot(self) -> None:
+        with self.lock:
+            now = time.monotonic()
+            start_at = max(now, self.next_start)
+            self.next_start = (
+                start_at + self.interval_seconds
+            )
+        delay = start_at - now
+        if delay > 0:
+            time.sleep(delay)
 
 
 def download_batch(
@@ -296,50 +324,79 @@ def main() -> None:
         len(grid) + BATCH_SIZE - 1
     ) // BATCH_SIZE
 
-    all_batches = []
-
     print(
         "Downloading weather through feature date "
         f"{forecast_date} ({PAST_DAYS} prior days plus today)"
     )
     print(f"Grid cells: {len(grid):,}")
     print(f"Total batches: {total_batches}")
+    print(f"Concurrent requests: {MAX_WORKERS}")
     print(
-        "Planned pacing time: "
+        "Planned request-start window: "
         f"{max(0, total_batches - 1) * WAIT_SECONDS / 60:.1f} "
-        "minutes, plus API response time"
+        "minutes, with responses processed concurrently"
     )
 
-    for start in range(
-        0,
-        len(grid),
-        BATCH_SIZE,
-    ):
-        batch_number = (
-            start // BATCH_SIZE
-        ) + 1
+    batches = [
+        (
+            start // BATCH_SIZE + 1,
+            grid.iloc[
+                start:start + BATCH_SIZE
+            ].copy(),
+        )
+        for start in range(
+            0,
+            len(grid),
+            BATCH_SIZE,
+        )
+    ]
+    pacer = RequestPacer(WAIT_SECONDS)
 
-        batch = grid.iloc[
-            start:start + BATCH_SIZE
-        ].copy()
-
+    def fetch_batch(
+        batch_number: int,
+        batch: pd.DataFrame,
+    ) -> tuple[int, pd.DataFrame]:
+        pacer.wait_for_slot()
         print(
-            f"Downloading batch "
+            f"Starting batch "
             f"{batch_number} of {total_batches}..."
         )
-
-        batch_data = download_batch(
-            batch=batch,
-            batch_number=batch_number,
+        return (
+            batch_number,
+            download_batch(
+                batch=batch,
+                batch_number=batch_number,
+            ),
         )
 
-        all_batches.append(batch_data)
-
-        if batch_number < total_batches:
-            time.sleep(WAIT_SECONDS)
+    downloaded_batches: dict[int, pd.DataFrame] = {}
+    with ThreadPoolExecutor(
+        max_workers=MAX_WORKERS,
+    ) as executor:
+        futures = [
+            executor.submit(
+                fetch_batch,
+                batch_number,
+                batch,
+            )
+            for batch_number, batch in batches
+        ]
+        for future in as_completed(futures):
+            batch_number, batch_data = future.result()
+            downloaded_batches[batch_number] = batch_data
+            print(
+                f"Completed batch {batch_number} "
+                f"({len(downloaded_batches)} of "
+                f"{total_batches})"
+            )
 
     forecast = pd.concat(
-        all_batches,
+        [
+            downloaded_batches[batch_number]
+            for batch_number in sorted(
+                downloaded_batches
+            )
+        ],
         ignore_index=True,
     )
 

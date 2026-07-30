@@ -29,8 +29,9 @@ data/current/weather/recent_weather.parquet
 It requests the latest two prior days plus the current day from
 Open-Meteo, merges them into the retained weather history, and keeps the
 31 dates needed for rolling features. Retaining this file prevents every
-daily run from redownloading a full month for all 4,355 grids. The feature
-builder writes:
+daily run from redownloading a full month for all 4,355 grids. Request
+starts remain twelve seconds apart, while up to eight slow API responses
+can be processed concurrently. The feature builder writes:
 
 ```text
 data/current/features/next_day_features.parquet
