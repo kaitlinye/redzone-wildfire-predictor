@@ -64,6 +64,13 @@
           <strong>Relative-risk percentile</strong>
           <div class="risk-gradient" aria-hidden="true"></div>
           <div class="gradient-scale"><span>Lower</span><span>Higher</span></div>
+          <div class="surface-opacity-control">
+            <label for="surface-opacity">
+              <span>Map color opacity</span>
+              <output id="surface-opacity-value" for="surface-opacity">45%</output>
+            </label>
+            <input id="surface-opacity" type="range" min="10" max="70" step="5" value="45">
+          </div>
           <p class="tier-filter-title">Pin tiers</p>
           <label><input type="checkbox" data-pin-tier="Low"><i class="low"></i><span>Low</span></label>
           <label><input type="checkbox" data-pin-tier="Medium" checked><i class="medium"></i><span>Medium</span></label>

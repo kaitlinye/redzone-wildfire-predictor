@@ -14,6 +14,7 @@ let selectedId = null;
 let activePopupMarker = null;
 let riskSurfaceLayer = null;
 let pinsVisible = true;
+let riskSurfaceOpacity = 0.45;
 const visiblePinRisks = new Set([
   "Medium",
   "High",
@@ -315,7 +316,7 @@ function renderRiskSurface() {
         stroke: false,
         fill: true,
         fillColor: riskSurfaceColor(location.score),
-        fillOpacity: 0.62,
+        fillOpacity: riskSurfaceOpacity,
         interactive: false
       }).addTo(riskSurfaceLayer);
     });
@@ -519,6 +520,15 @@ document.querySelectorAll("[data-pin-tier]").forEach(checkbox => {
     }
     map.closePopup();
     renderPredictionMarkers();
+  });
+});
+
+document.getElementById("surface-opacity").addEventListener("input", event => {
+  riskSurfaceOpacity = Number(event.currentTarget.value) / 100;
+  document.getElementById("surface-opacity-value").textContent =
+    `${event.currentTarget.value}%`;
+  riskSurfaceLayer?.eachLayer(layer => {
+    layer.setStyle({ fillOpacity: riskSurfaceOpacity });
   });
 });
 
