@@ -85,11 +85,11 @@ Then open `http://localhost:8000`.
 The current model supports one next-calendar-day horizon. The site does not
 claim sub-daily, 48-hour, or 72-hour predictions.
 
-## Automatic daily updates
+## Manual prediction updates
 
-`.github/workflows/update-daily-predictions.yml` runs every day at
-08:00 UTC (12:00 AM PST or 01:00 AM PDT) and can also be started manually
-from the repository's **Actions** tab. It:
+The finished course project no longer runs scheduled weather downloads.
+`.github/workflows/update-daily-predictions.yml` can still be started
+manually from the repository's **Actions** tab. It:
 
 1. downloads the current Open-Meteo forecast and recent weather history;
 2. builds the rolling and static model features;
@@ -116,6 +116,6 @@ Before the first run, open the repository settings:
 - Under **Actions → General → Workflow permissions**, select
   **Read and write permissions**.
 
-If a scheduled update fails, the last successful Pages deployment remains
+If a manual update fails, the last successful Pages deployment remains
 online. Inspect the failed run in the Actions tab and rerun it after fixing
 the download or configuration problem.
